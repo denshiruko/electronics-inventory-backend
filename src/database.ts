@@ -88,6 +88,8 @@ function initDb(): void {
         db.run(`CREATE TABLE IF NOT EXISTS locations
                 (
                     code        TEXT PRIMARY KEY,
+                    row_index   TEXT,
+                    col_index   TEXT,
                     type        TEXT,
                     description TEXT
                 )`);

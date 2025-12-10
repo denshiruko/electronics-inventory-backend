@@ -5,6 +5,7 @@ import helmet from "helmet";
 import {config} from "./config";
 import "./database";
 import authRoutes from "./routes/authRoutes";
+import partsRoutes from "./routes/partsRoutes";
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(cors({
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/api/parts", partsRoutes);
 
 app.get("/", (_req: Request, res: Response) => {
     res.json({
