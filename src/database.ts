@@ -17,6 +17,35 @@ const db = new sqlite.Database(dbPath, (err) => {
     }
 });
 
+export const dbAsync = {
+    all: (sql: string, params: any[] = []): Promise<any[]> => {
+        return new Promise((resolve, reject) => {
+            db.all(sql, params, (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
+    },
+
+    get: (sql: string, params: any[] = []): Promise<any> => {
+        return new Promise((resolve, reject) => {
+            db.get(sql, params, (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
+    },
+
+    run: (sql: string, params: any[] = []): Promise<sqlite3.RunResult> => {
+        return new Promise((resolve, reject) => {
+            db.run(sql, params, function (this: sqlite3.RunResult, err) {
+                if (err) reject(err);
+                else resolve(this);
+            });
+        });
+    }
+};
+
 function initDb(): void {
     db.serialize(() => {
         db.run(`CREATE TABLE IF NOT EXISTS users

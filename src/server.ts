@@ -4,6 +4,7 @@ import helmet from "helmet";
 
 import {config} from "./config";
 import "./database";
+import authRoutes from "./routes/authRoutes";
 
 const app = express();
 
@@ -13,7 +14,9 @@ app.use(cors({
 }));
 app.use(express.json());
 
-app.get("/", (req: Request, res: Response) => {
+app.use("/api/auth", authRoutes);
+
+app.get("/", (_req: Request, res: Response) => {
     res.json({
         status: "ok",
         message: "Electronics Inventory Management API",
@@ -21,11 +24,11 @@ app.get("/", (req: Request, res: Response) => {
     });
 });
 
-app.use((req: Request, res: Response) => {
+app.use((_req: Request, res: Response) => {
     res.status(404).json({error: "Not Found"});
 });
 
-app.use((err: Error, req: Request, res: Response) => {
+app.use((err: Error, _req: Request, res: Response) => {
     console.error(err.stack);
     res.status(500).json({
         error: "Internal Server Error",
