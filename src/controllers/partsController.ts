@@ -74,13 +74,6 @@ export async function cutInventory(req: Request, res: Response) {
 
         await dbAsync.run("BEGIN TRANSACTION");
 
-        await dbAsync.run(`
-            UPDATE inventory
-            SET quantity     = quantity - 1,
-                last_updated = CURRENT_TIMESTAMP
-            WHERE id = ?
-        `, [inventoryId]);
-
         try {
             await dbAsync.run(`
                 UPDATE inventory
