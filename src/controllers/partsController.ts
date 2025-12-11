@@ -3,7 +3,7 @@ import {dbAsync} from "../database";
 
 export async function getParts(req: Request, res: Response) {
     try {
-        const {category, package_code, supplier_code} = req.query;
+        const {category, package_code, supplier_code, q} = req.query;
 
         if (supplier_code) {
             const sql = `
@@ -18,10 +18,10 @@ export async function getParts(req: Request, res: Response) {
         }
 
         let sql = `
-            SELECT i.*, p.name, p.category, p.package_code, p.default_spec, p.unit
-            FROM inventory i
-                     JOIN parts_catalog p ON i.part_sku = p.sku
-            WHERE i.quantity > 0
+            SELECT p.*, i.id as inventory_id, i.location_code, i.quantity, i.condition, i.spec_value
+            FROM parts_catalog p
+                     LEFT JOIN inventory i ON p.sku = i.part_sku
+            WHERE true
         `;
         const params: any[] = [];
 
@@ -32,6 +32,12 @@ export async function getParts(req: Request, res: Response) {
         if (package_code) {
             sql += " AND p.package_code = ?";
             params.push(package_code);
+        }
+
+        if(q){
+            sql += " AND (p.sku LIKE ? OR p.name LIKE ?)";
+            const keyword = `%${q}%`;
+            params.push(keyword, keyword);
         }
 
         const parts = await dbAsync.all(sql, params);
