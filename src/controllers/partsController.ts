@@ -3,38 +3,64 @@ import {dbAsync} from "../database";
 
 export async function getParts(req: Request, res: Response) {
     try {
-        const {category, package_code, supplier_code, q} = req.query;
-
-        if (supplier_code) {
-            const sql = `
-                SELECT p.name, p.sku, i.location_code, i.quantity, i.condition
-                FROM parts_catalog p
-                         JOIN part_suppliers s ON p.sku = s.part_sku
-                         LEFT JOIN inventory i ON p.sku = i.part_sku
-                WHERE s.supplier_code = ?
-            `;
-            const parts = await dbAsync.all(sql, [supplier_code]);
-            return res.json(parts);
-        }
+        const {name, sku, supplier_code, package_code, category, description, q} = req.query;
 
         let sql = `
-            SELECT p.*, i.id as inventory_id, i.location_code, i.quantity, i.condition, i.spec_value
+            SELECT DISTINCT p.*, i.id as inventory_id, i.location_code, i.quantity, i.condition, i.spec_value
             FROM parts_catalog p
                      LEFT JOIN inventory i ON p.sku = i.part_sku
+                     LEFT JOIN part_suppliers s ON p.sku = s.part_sku
             WHERE true
         `;
         const params: any[] = [];
 
-        if (category) {
-            sql += " AND p.category = ?";
-            params.push(category);
-        }
-        if (package_code) {
-            sql += " AND p.package_code = ?";
-            params.push(package_code);
+        if (name) {
+            sql += " AND p.name LIKE ?";
+            params.push(`%${name}%`);
         }
 
-        if(q){
+        if (sku) {
+            sql += " AND p.sku LIKE ?";
+            params.push(`%${sku}%`);
+        }
+
+        if (supplier_code) {
+            sql += " AND s.supplier_code = ?";
+            params.push(supplier_code);
+        }
+
+        const toArray = (val: any) => {
+            if (Array.isArray(val)) return val;
+            return String(val).split(",").map((v) => v.trim()).filter(v => v);
+        };
+
+        if (package_code) {
+            const packages = toArray(package_code);
+            if (packages.length > 0) {
+                const placeholder = packages.map(() => "?").join(" OR p.package_code = ");
+                sql += ` AND (p.package_code = ${placeholder})`;
+                params.push(...packages);
+            }
+        }
+
+        if (category) {
+            const categories = toArray(category);
+            if (categories.length > 0) {
+                const placeholders = categories.map(() => "?").join(" OR p.category = ");
+                sql += ` AND (p.category = ${placeholders})`;
+                params.push(...categories);
+            }
+        }
+
+        if (description) {
+            const words = String(description).split(/[\s　]+/).filter(w => w);
+            for (const word of words) {
+                sql += " AND p.description LIKE ?";
+                params.push(`%${word}%`);
+            }
+        }
+
+        if (q) {
             sql += " AND (p.sku LIKE ? OR p.name LIKE ?)";
             const keyword = `%${q}%`;
             params.push(keyword, keyword);
