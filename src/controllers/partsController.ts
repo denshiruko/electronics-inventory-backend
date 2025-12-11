@@ -302,3 +302,39 @@ export async function deletePart(req: Request, res: Response) {
         res.status(500).json({error: "Internal Server Error"});
     }
 }
+
+export async function getCategories(req: Request, res: Response) {
+    try {
+        const sql = `
+            SELECT DISTINCT category
+            FROM parts_catalog
+            WHERE category IS NOT NULL
+              AND category != ''
+            ORDER BY category
+        `;
+        const rows = await dbAsync.all(sql);
+        const list = rows.map(row => row.category);
+        res.json(list);
+    } catch (err) {
+        console.error("Error fetching categories:", err);
+        res.status(500).json({error: "Internal Server Error"});
+    }
+}
+
+export async function getPackage(req: Request, res: Response) {
+    try {
+        const sql = `
+            SELECT DISTINCT package_code
+            FROM parts_catalog
+            WHERE package_code IS NOT NULL
+              AND package_code != ''
+            ORDER BY package_code
+        `;
+        const rows = await dbAsync.all(sql);
+        const list = rows.map(row => row.package_code);
+        res.json(list);
+    } catch (err) {
+        console.error("Error fetching package codes:", err);
+        res.status(500).json({error: "Internal Server Error"});
+    }
+}
