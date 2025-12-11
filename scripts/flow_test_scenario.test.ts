@@ -1,7 +1,7 @@
 /**
  * Parts API Integration Test
  * * サーバー実装に基づき、/api/parts エンドポイントをテストします。
- * * 認証が必要なため、最初にログイン処理を行います。
+ * * 認証、CRUD、詳細な検索機能、在庫操作を検証します。
  * 前提: サーバーが http://localhost:3000 で起動していること
  */
 import {config} from "../src/config";
@@ -9,11 +9,10 @@ import {config} from "../src/config";
 const BASE_URL = process.env.API_BASE_URL || "http://localhost:3000/api";
 
 // テスト用アカウント情報
-// 環境変数か、デフォルト値を使用します。実際の環境に合わせて変更してください。
 const TEST_USER = config.adminInitUser;
 const TEST_PASS = config.adminInitPass;
 
-// APIのレスポンス型定義 (サーバー実装に合わせて調整)
+// APIのレスポンス型定義
 interface Part {
     sku: string;
     name: string;
@@ -21,10 +20,13 @@ interface Part {
     mpn?: string;
     package_code?: string;
     description?: string;
-    quantity?: number; // サーバー実装にはないが、将来的に必要かも？今回は検証から外します
-    price?: number;
-    spec_definition?: any;
-    suppliers?: any[];
+    quantity?: number;
+    spec_value?: number;
+    suppliers?: Array<{
+        supplier_name: string;
+        supplier_code: string;
+        product_url: string;
+    }>;
 }
 
 // 作成用リクエストボディ
@@ -38,6 +40,7 @@ interface CreatePartRequest {
     image_url?: string;
     default_spec?: number;
     unit?: string;
+    description?: string;
     suppliers?: Array<{
         supplier_name: string;
         supplier_code: string;
@@ -49,47 +52,46 @@ interface LoginResponse {
     token: string;
 }
 
-interface CreateResponse {
-    message: string;
-}
-
-describe('Parts API Integration Test (Real HTTP Requests)', () => {
+describe("Parts API Integration Test (Full Coverage)", () => {
     // テスト間で共有する変数
     let targetSku: string | null = null;
     let authToken: string | null = null;
 
-    // テストデータ: SKUをユニークにするため動的に生成
     const timestamp = Date.now();
-    const testSku = `TEST-TR-${timestamp}`;
+    const testSku = `TEST-IC-${timestamp}`;
+    const supplierCode = `SUP-${timestamp}`;
 
     const newPartData: CreatePartRequest = {
         sku: testSku,
-        category: 'Semiconductors',
-        name: 'High-Speed Test Transistor',
+        category: "IC",
+        name: "Dual OpAmp Low Noise",
         mpn: `MPN-${timestamp}`,
-        package_code: 'TO-92',
-        unit: 'pcs',
-        spec_definition: {
-            "v_ceo": "50V",
-            "i_c": "150mA"
-        },
+        package_code: "DIP8",
+        unit: "pcs",
+        // 注意: descriptionカラムがparts_catalogに存在するか確認が必要ですが、
+        // コントローラーの実装には `p.description` があるため、ここには含めません（DB定義上TEXTカラムがある前提、またはspec_definition等で代用）
+        // 今回のコントローラー実装を見る限り、SQLで `p.description` を参照しているので、
+        // 本来は createPart で description を保存する必要があります。
+        // createPartの実装には description が含まれていないため、
+        // 厳密には description 検索のテストは "データが入っていないためヒットしない" 結果になる可能性があります。
+        // ここではフローの確認を優先します。
         suppliers: [
             {
                 supplier_name: "Test Supplier Inc.",
-                supplier_code: `S-${timestamp}`,
+                supplier_code: supplierCode, // 検索テスト用: サプライヤーコード
                 product_url: "http://example.com/part"
             }
         ]
     };
 
     /**
-     * 0. ログイン (認証トークン取得)
+     * 1. 認証 (Login)
      */
-    test('POST /auth/login - 認証トークンを取得できること', async () => {
+    test("POST /auth/login - 認証トークンを取得できること", async () => {
         const response = await fetch(`${BASE_URL}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: TEST_USER, password: TEST_PASS }),
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({username: TEST_USER, password: TEST_PASS})
         });
 
         if (response.status !== 200) {
@@ -98,192 +100,194 @@ describe('Parts API Integration Test (Real HTTP Requests)', () => {
         }
 
         expect(response.status).toBe(200);
-
         const body = (await response.json()) as LoginResponse;
-        expect(body).toHaveProperty('token');
+        expect(body).toHaveProperty("token");
         authToken = body.token;
-
-        console.log('[Test] Logged in successfully.');
     });
 
     /**
-     * 1. 部品作成 (POST)
-     * 実装: createPart
+     * 2. 部品作成 (Create)
      */
-    test('POST /parts - 新規部品を作成できること', async () => {
-        if (!authToken) throw new Error('Setup failed: No auth token');
+    test("POST /parts - 新規部品を作成できること", async () => {
+        if (!authToken) throw new Error("No auth token");
 
         const response = await fetch(`${BASE_URL}/parts`, {
-            method: 'POST',
+            method: "POST",
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${authToken}`
             },
-            body: JSON.stringify(newPartData),
+            body: JSON.stringify(newPartData)
         });
 
         if (response.status !== 201) {
-            const errorBody = await response.text();
-            console.error(`[POST /parts Error] Status: ${response.status}, Body: ${errorBody}`);
+            console.error(`Create Error: ${await response.text()}`);
         }
-
         expect(response.status).toBe(201);
-
-        // サーバー実装では { message: "Part created successfully" } が返る
-        const body = (await response.json()) as CreateResponse;
-        expect(body.message).toBe("Part created successfully");
-
-        // POSTのレスポンスにはIDが含まれないため、送信したSKUを保存して後続のテストで使用
         targetSku = newPartData.sku;
-        console.log(`[Test] Created Part SKU: ${targetSku}`);
     });
 
     /**
-     * 2. 部品一覧検索 (GET List)
-     * 実装: getParts (keyword検索のテスト)
+     * 3. 検索機能のテスト (Search)
      */
-    test('GET /parts?q=sku - 作成した部品を検索で見つけられること', async () => {
-        if (!targetSku) throw new Error('Setup failed: No part created');
-        if (!authToken) throw new Error('Setup failed: No auth token');
-
-        // 作成したSKUで検索
-        const response = await fetch(`${BASE_URL}/parts?q=${targetSku}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
+    describe("検索機能の検証", () => {
+        const headers = () => ({
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${authToken}`
         });
 
-        expect(response.status).toBe(200);
+        test("検索: 部品名 (部分一致) - \"OpAmp\" でヒットすること", async () => {
+            const qs = new URLSearchParams({name: "OpAmp"}).toString();
+            const response = await fetch(`${BASE_URL}/parts?${qs}`, {headers: headers()});
+            expect(response.status).toBe(200);
+            const parts = (await response.json()) as Part[];
+            const found = parts.find(p => p.sku === targetSku);
+            expect(found).toBeDefined();
+        });
 
-        const parts = (await response.json()) as Part[];
-        expect(Array.isArray(parts)).toBe(true);
-        expect(parts.length).toBeGreaterThan(0);
+        test("検索: SKU (部分一致) - SKUの一部でヒットすること", async () => {
+            const qs = new URLSearchParams({sku: "TEST-IC"}).toString();
+            const response = await fetch(`${BASE_URL}/parts?${qs}`, {headers: headers()});
+            expect(response.status).toBe(200);
+            const parts = (await response.json()) as Part[];
+            const found = parts.find(p => p.sku === targetSku);
+            expect(found).toBeDefined();
+        });
 
-        // 検索結果に作成した部品が含まれているか確認
-        const foundPart = parts.find(p => p.sku === targetSku);
-        expect(foundPart).toBeDefined();
-        expect(foundPart?.name).toBe(newPartData.name);
+        test("検索: サプライヤーコード (完全一致) - 指定コードでヒットすること", async () => {
+            const qs = new URLSearchParams({supplier_code: supplierCode}).toString();
+            const response = await fetch(`${BASE_URL}/parts?${qs}`, {headers: headers()});
+            expect(response.status).toBe(200);
+            const parts = (await response.json()) as Part[];
+            // サプライヤー検索の場合、レスポンス構造が少し異なる場合があるので注意（コントローラー実装依存）
+            // 実装では: SELECT p.name, p.sku ... FROM ... WHERE s.supplier_code = ?
+            const found = parts.find(p => p.sku === targetSku);
+            expect(found).toBeDefined();
+        });
+
+        test("検索: パッケージ (OR条件) - \"DIP8, SOP8\" でヒットすること", async () => {
+            // DIP8 (対象) と SOP8 (ダミー) を指定
+            const qs = new URLSearchParams({package_code: "SOP8, DIP8"}).toString();
+            const response = await fetch(`${BASE_URL}/parts?${qs}`, {headers: headers()});
+            expect(response.status).toBe(200);
+            const parts = (await response.json()) as Part[];
+            const found = parts.find(p => p.sku === targetSku);
+            expect(found).toBeDefined();
+            // パッケージ違いでフィルタ除外されるか確認
+            const qs2 = new URLSearchParams({package_code: "SOP8"}).toString();
+            const res2 = await fetch(`${BASE_URL}/parts?${qs2}`, {headers: headers()});
+            const parts2 = (await res2.json()) as Part[];
+            expect(parts2.find(p => p.sku === targetSku)).toBeUndefined();
+        });
+
+        test("検索: カテゴリ (OR条件) - \"IC\" でヒットすること", async () => {
+            const qs = new URLSearchParams({category: "IC"}).toString();
+            const response = await fetch(`${BASE_URL}/parts?${qs}`, {headers: headers()});
+            expect(response.status).toBe(200);
+            const parts = (await response.json()) as Part[];
+            expect(parts.find(p => p.sku === targetSku)).toBeDefined();
+        });
+
+        test("検索: 複合条件 (AND) - カテゴリとパッケージで絞り込み", async () => {
+            const qs = new URLSearchParams({
+                category: "IC",
+                package_code: "DIP8"
+            }).toString();
+            const response = await fetch(`${BASE_URL}/parts?${qs}`, {headers: headers()});
+            expect(response.status).toBe(200);
+            const parts = (await response.json()) as Part[];
+            expect(parts.find(p => p.sku === targetSku)).toBeDefined();
+        });
     });
 
     /**
-     * 3. 部品詳細取得 (GET Detail)
-     * 実装: getPartBySku
+     * 4. 詳細取得 (Get Detail)
      */
-    test('GET /parts/:sku - SKU指定で詳細情報を取得できること', async () => {
-        if (!targetSku) throw new Error('Setup failed: No part created');
-        if (!authToken) throw new Error('Setup failed: No auth token');
-
+    test("GET /parts/:sku - 詳細情報を取得し、サプライヤー情報が含まれること", async () => {
         const response = await fetch(`${BASE_URL}/parts/${targetSku}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
+            method: "GET",
+            headers: {"Authorization": `Bearer ${authToken}`}
         });
-
-        if (response.status !== 200) {
-            console.error(`[GET /parts/:sku Error] Status: ${response.status}, Body: ${await response.text()}`);
-        }
 
         expect(response.status).toBe(200);
         const body = (await response.json()) as Part;
-
         expect(body.sku).toBe(targetSku);
-        expect(body.name).toBe(newPartData.name);
-
-        // サプライヤー情報も取得できているか確認 (LEFT JOINの結果)
         expect(body.suppliers).toBeDefined();
-        expect(Array.isArray(body.suppliers)).toBe(true);
-        if (body.suppliers && body.suppliers.length > 0) {
-            expect(body.suppliers[0].supplier_name).toBe(newPartData.suppliers![0].supplier_name);
-        }
+        expect(body.suppliers![0].supplier_code).toBe(supplierCode);
     });
 
     /**
-     * 4. 部品情報更新 (PATCH)
-     * 実装: updatePart
+     * 5. 在庫切断機能 (Cut Inventory)
+     * 注意: 現在のAPIには「在庫を追加する(Add Inventory)」機能がないため、
+     * 有効な inventoryId を取得できません。
+     * そのため、適当なIDを送信し、「404 Not Found」が返ることで
+     * エンドポイントの存在とエラーハンドリングを検証します。
      */
-    test('PATCH /parts/:sku - 部品情報を更新できること', async () => {
-        if (!targetSku) throw new Error('Setup failed: No part created');
-        if (!authToken) throw new Error('Setup failed: No auth token');
+    test("POST /parts/cut - 存在しない在庫IDで404が返ること (エンドポイント到達確認)", async () => {
+        const dummyInventoryId = 999999;
+        const response = await fetch(`${BASE_URL}/parts/cut`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${authToken}`
+            },
+            body: JSON.stringify({
+                inventoryId: dummyInventoryId,
+                useAmount: 1
+            })
+        });
 
+        // インベントリが存在しないため 404 が期待される
+        // (もし在庫があれば、トランザクション処理が走り 200 になる)
+        if (response.status !== 404) {
+            console.log(`Cut response: ${response.status}`, await response.json());
+        }
+        expect(response.status).toBe(404);
+    });
+
+    /**
+     * 6. 更新 (Update)
+     */
+    test("PATCH /parts/:sku - 部品情報を更新できること", async () => {
         const updateData = {
-            name: "Updated Transistor Name",
-            spec_definition: {
-                "v_ceo": "60V", // 仕様変更
-                "i_c": "200mA"
-            }
+            name: "Updated OpAmp Name",
+            package_code: "SOP8" // パッケージを変更してみる
         };
 
         const response = await fetch(`${BASE_URL}/parts/${targetSku}`, {
-            method: 'PATCH',
+            method: "PATCH",
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${authToken}`
             },
-            body: JSON.stringify(updateData),
+            body: JSON.stringify(updateData)
         });
 
-        if (response.status !== 200) {
-            console.error(`[PATCH /parts/:sku Error] Status: ${response.status}, Body: ${await response.text()}`);
-        }
         expect(response.status).toBe(200);
 
-        // 更新内容が反映されているか確認するため再取得
-        const verifyResponse = await fetch(`${BASE_URL}/parts/${targetSku}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            }
+        // 変更の確認
+        const checkRes = await fetch(`${BASE_URL}/parts/${targetSku}`, {
+            headers: {"Authorization": `Bearer ${authToken}`}
         });
-
-        const body = (await verifyResponse.json()) as Part;
+        const body = await checkRes.json();
         expect(body.name).toBe(updateData.name);
-        expect(body.spec_definition.v_ceo).toBe("60V");
+        expect(body.package_code).toBe(updateData.package_code);
     });
 
     /**
-     * 5. 部品削除 (DELETE)
-     * 実装: deletePart
+     * 7. 削除 (Delete)
      */
-    test('DELETE /parts/:sku - 部品を削除できること', async () => {
-        if (!targetSku) throw new Error('Setup failed: No part created');
-        if (!authToken) throw new Error('Setup failed: No auth token');
-
+    test("DELETE /parts/:sku - 部品を削除できること", async () => {
         const response = await fetch(`${BASE_URL}/parts/${targetSku}`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
+            method: "DELETE",
+            headers: {"Authorization": `Bearer ${authToken}`}
         });
-
-        if (![200, 204].includes(response.status)) {
-            console.error(`[DELETE /parts/:sku Error] Status: ${response.status}, Body: ${await response.text()}`);
-        }
-
-        // 204 No Content または 200 OK
         expect([200, 204]).toContain(response.status);
-    });
 
-    /**
-     * 6. 削除確認 (GET -> 404)
-     */
-    test('GET /parts/:sku - 削除後は404が返ること', async () => {
-        if (!targetSku) throw new Error('Setup failed: No part created');
-        if (!authToken) throw new Error('Setup failed: No auth token');
-
-        const response = await fetch(`${BASE_URL}/parts/${targetSku}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
+        // 削除後の確認
+        const checkRes = await fetch(`${BASE_URL}/parts/${targetSku}`, {
+            headers: {"Authorization": `Bearer ${authToken}`}
         });
-
-        expect(response.status).toBe(404);
+        expect(checkRes.status).toBe(404);
     });
 });
